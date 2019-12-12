@@ -161,6 +161,22 @@ def download_unit_biomass():
             mastr_fail = {'EinheitMastrNummer': [mastr_list[i]]}
             unit_biomass_fail = pd.DataFrame(mastr_fail)
             write_to_csv(fname_biomass_fail_u, unit_biomass_fail)
+            retry(unit_biomass_fail)
+
+
+def retry(fail_first):
+  mastr_fail = pd.DataFrame()
+  for i in fail_first:
+    unit_wind = get_power_unit_biomass(i)
+    if unit_wind is not None:
+      write_to_csv(fname_biomass_unit, unit_biomass)
+    else:
+      log.exception(f'Download failed unit_biomass ({i})')
+      mastr_fail.append(i)
+  fail_second = pd.DataFrame(mastr_fail)
+  csv_input = pd.read_csv(fname_biomass_fail_u)
+  csv_input['2nd Fail'] = fail_second
+  csv_input.to_csv(fname_biomass_fail_u)
 
 
 def get_power_unit_biomass(mastr_unit_biomass):

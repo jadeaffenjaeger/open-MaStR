@@ -163,6 +163,21 @@ def download_unit_hydro():
             mastr_fail = {'EinheitMastrNummer': [mastr_list[i]]}
             unit_hydro_fail = pd.DataFrame(mastr_fail)
             write_to_csv(fname_hydro_fail_u, unit_hydro_fail)
+            retry(unit_hydro_fail)
+
+def retry(fail_first):
+  mastr_fail = pd.DataFrame()
+  for i in fail_first:
+    unit_hydro = get_power_unit_hydro(i)
+    if unit_hydro is not None:
+      write_to_csv(fname_hydro_unit, unit_hydro)
+    else:
+      log.exception(f'Download failed unit_hydro ({i})')
+      mastr_fail.append(i)
+  fail_second = pd.DataFrame(mastr_fail)
+  csv_input = pd.read_csv(fname_hydro_fail_u)
+  csv_input['2nd Fail'] = fail_second
+  csv_input.to_csv(fname_hydro_fail_u)
 
 
 def get_power_unit_hydro(mastr_unit_hydro):

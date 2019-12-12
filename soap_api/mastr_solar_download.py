@@ -155,7 +155,7 @@ def download_parallel_unit_solar(start_from=0,n_entries=1, parallelism=12):
 
     power_unit_solar = read_power_unit_solar(fname_power_unit_solar)
     mastr_list = power_unit_solar['EinheitMastrNummer'].values.tolist()
-    # mastr_list = list(dict.fromkeys(mastr_list))
+    mastr_list = list(dict.fromkeys(mastr_list))
     mastr_list_len = len(mastr_list)
 
     # check wether user input
@@ -172,18 +172,26 @@ def download_parallel_unit_solar(start_from=0,n_entries=1, parallelism=12):
     t = time.time()
     proc_list = split_to_sublists(mastr_list[start_from:end_at], len(mastr_list[start_from:end_at]), cpu_count)
     print("This may take a moment. Processing {} data batches.".format(len(proc_list)))
-    
-    #wait_for_offtime()
-
-    try:
-        partial(split_to_threads, parallelism=parallelism)
-        unit_solar = process_pool.map(split_to_threads, proc_list)
-        process_pool.close()
-        process_pool.join()
-
-    except Exception as e:
-        log.error(e)
-
+    wait_for_offtime()
+    counter =0
+    while counter<2:
+        try:
+            partial(split_to_threads, parallelism=parallelism)
+            unit_solar = process_pool.map(split_to_threads, proc_list)
+            process_pool.close()
+            process_pool.join()
+            counter +=1
+            failed_idx = []
+            if not len(unit_solar)<=0:
+                for mylist, idx in unit_solar: 
+                    if not len(mylist)==0 or mylist.empty or mylist is None:
+                        write_to_csv(fname_solar_fail_u, idx)
+                        failed_idx.append(idx)
+                proc_list = split_to_sublists(failed_idx, len(failed_idx), cpu_count)
+            else:
+                counter = 2
+        except Exception as e:
+            log.error(e)
     log.info('Time needed %s', time.time()-t)
 
 def wait_for_offtime():
@@ -249,9 +257,9 @@ def get_power_unit_solar(mastr_unit_solar):
         unit_solar['version'] = data_version
         unit_solar['timestamp'] = str(datetime.datetime.now())
         write_to_csv(fname_solar_unit, unit_solar)
-        return unit_solar
     except Exception as e:
         log.info('Download failed for %s', mastr_unit_solar)
+    return [unit_solar, mastr_unit_solar]
 
 
 
@@ -393,14 +401,26 @@ def download_parallel_unit_solar_eeg(
     t = time.time()
     proc_list = split_to_sublists(unit_solar_list[start_from:end_at],len(unit_solar_list[start_from:end_at]),cpu_count)
     print("This may take a moment. Processing {} data eeg batches.".format(len(proc_list)))
-    try:
-        partial(split_to_threads_eeg, parallelism=parallelism)
-        unit_solar = process_pool.map(split_to_threads_eeg, proc_list)
-        process_pool.close()
-        process_pool.join()
-        write_to_csv(fname_solar_eeg, unit_solar)
-    except Exception as e:
-        log.error(e)
+    wait_for_offtime()
+    counter =0
+    while counter<2:
+        try:
+            partial(split_to_threads_eeg, parallelism=parallelism)
+            unit_solar = process_pool.map(split_to_threads_eeg, proc_list)
+            process_pool.close()
+            process_pool.join()
+            counter +=1
+            failed_idx = []
+            if not len(unit_solar)<=0:
+                for mylist, idx in unit_solar: 
+                    if not len(mylist)==0 or mylist.empty or mylist is None:
+                        write_to_csv(fname_solar_eeg_fail_u, idx)
+                        failed_idx.append(idx)
+                proc_list = split_to_sublists(failed_idx, len(failed_idx), cpu_count)
+            else:
+                counter = 2
+        except Exception as e:
+            log.error(e)
     log.info('time needed %s', time.time()-t)
 
 
@@ -434,6 +454,7 @@ def get_unit_solar_eeg(mastr_solar_eeg):
     unit_solar_eeg : DataFrame
         EEG-Anlage-Solar.
     """
+    mastr_solar_eeg = pd.DataFrame()
     data_version = get_data_version()
     try:
         c = client_bind.GetAnlageEegSolar(apiKey=api_key,
@@ -446,9 +467,10 @@ def get_unit_solar_eeg(mastr_solar_eeg):
         unit_solar_eeg.index.names = ['lid']
         unit_solar_eeg["version"] = data_version
         unit_solar_eeg["timestamp"] = str(datetime.datetime.now())
+        write_to_csv(fname_solar_eeg_unit, unit_solar_eeg)
     except Exception as e:
-        return unit_solar_eeg
-    return unit_solar_eeg
+        log.info(e)
+    return [unit_solar_eeg, mastr_solar_eeg]
 
 
 def read_unit_solar_eeg(csv_name):
@@ -508,14 +530,31 @@ def download_unit_solar():
     unit_solar_list_len = len(unit_solar_list)
     log.info(f'Download MaStR Solar')
     log.info(f'Number of unit_solar: {unit_solar_list_len}')
-
+    failed_idx = []
     for i in range(start_from, unit_solar_list_len, 1):
         try:
             unit_solar = get_power_unit_solar(unit_solar_list[i])
-            write_to_csv(fname_solar, unit_solar)
         except:
             log.exception(f'Download failed unit_solar ({i}): {unit_solar_list[i]}')
+            mastr_fail = {'EinheitMastrNummer': [unit_solar_list[i]]}
+            unit_solar_fail = pd.DataFrame(mastr_fail)
+            write_to_csv(fname_solar_fail_u, unit_solar_fail)
+            failed_idx.append(i)
+    retry(failed_idx)
 
+def retry(fail_first):
+    mastr_fail = []
+    for i in fail_first:
+        unit_solar = get_power_unit_solar(i)
+        if unit_solar[0] is not None:
+            write_to_csv(fname_solar_unit, unit_solar[0])
+        else:
+            log.exception(f'Download failed unit_solar ({i})')
+            mastr_fail.append(i)
+    fail_second = pd.DataFrame(mastr_fail)
+    csv_input = pd.read_csv(fname_solar_fail_u)
+    csv_input['2nd Fail'] = fail_second
+    csv_input.to_csv(fname_solar_fail_u)
 
 # Download unit-solar-eeg
 def download_unit_solar_eeg():
@@ -533,10 +572,29 @@ def download_unit_solar_eeg():
 
     unit_solar_list = unit_solar['EegMastrNummer'].values.tolist()
     unit_solar_list_len = len(unit_solar_list)
+    failed_idx = []
 
     for i in range(0, unit_solar_list_len, 1):
         try:
             unit_solar_eeg = get_unit_solar_eeg(unit_solar_list[i])
-            write_to_csv(fname_solar_eeg, unit_solar_eeg)
         except:
             log.exception(f'Download failed unit_solar_eeg ({i}): {unit_solar_list[i]}')
+            mastr_fail = {'EinheitMastrNummer': [unit_solar_list[i]]}
+            unit_solar_fail = pd.DataFrame(mastr_fail)
+            write_to_csv(fname_solar_eeg_fail_u, unit_solar_eeg_fail)
+            failed_idx.append(i)
+    retry_eeg(unit_solar_fail)
+
+def retry_eeg(fail_first):
+    mastr_fail = []
+    for i in fail_first:
+        unit_solar = get_power_unit_solar(i)
+    if unit_solar[0] is not None:
+      write_to_csv(fname_solar_eeg_unit, unit_solar[0])
+    else:
+      log.exception(f'Download failed unit_solar ({i})')
+      mastr_fail.append(i)
+    fail_second = pd.DataFrame(mastr_fail)
+    csv_input = pd.read_csv(fname_solar_eeg_fail_u)
+    csv_input['2nd Fail'] = fail_second
+    csv_input.to_csv(fname_solar_eeg_fail_u)

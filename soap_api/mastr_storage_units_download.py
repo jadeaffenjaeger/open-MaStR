@@ -58,7 +58,7 @@ def download_parallel_unit_storage(start_from=0, end_at=20, overwrite=True):
     process_pool = mp.Pool(processes=mp.cpu_count())
     storage = pd.DataFrame()
     try:
-        storage_units = process_pool.map(split_to_threads,split_storage_list)
+        failed_downloads = process_pool.map(split_to_threads,split_storage_list)
         process_pool.close()
         process_pool.join()
     except Exception as e:
@@ -79,11 +79,17 @@ def download_unit_storage(start_from=0, end_at=20, overwrite=True):
 
 
 def split_to_threads(sublist):
-    pool = ThreadPool(processes=4)
+    failed_downloads = pd.DataFrame()
+    pool = ThreadPool(processes=12)
     results = pool.map(get_unit_storage, sublist)
     pool.close()
     pool.join()
-    return results
+    if not len(results)==0:
+        for mylist, ind in result:
+            if mylist is None:
+                failed_downloads.append(ind)
+    write_to_csv(fname_storage_fail_u,failed_downloads)
+    return failed_downloads
 
 
 ''' starting batch num /current 1st speichereinheit 5th Aug 2019:    1220000 '''
@@ -131,4 +137,4 @@ def get_unit_storage(mastr_unit_storage):
         write_to_csv(fname_storage, unit_storage)
     except Exception as e:
         return
-    return unit_storage
+    return [unit_storage, mastr_unit_storage]
